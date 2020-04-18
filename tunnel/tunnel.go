@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/micro/go-micro/transport"
+	"github.com/micro/go-micro/v2/transport"
 )
 
 const (
@@ -26,6 +26,16 @@ var (
 	ErrDiscoverChan = errors.New("failed to discover channel")
 	// ErrLinkNotFound is returned when a link is specified at dial time and does not exist
 	ErrLinkNotFound = errors.New("link not found")
+	// ErrLinkDisconnected is returned when a link we attempt to send to is disconnected
+	ErrLinkDisconnected = errors.New("link not connected")
+	// ErrLinkLoppback is returned when attempting to send an outbound message over loopback link
+	ErrLinkLoopback = errors.New("link is loopback")
+	// ErrLinkRemote is returned when attempting to send a loopback message over remote link
+	ErrLinkRemote = errors.New("link is remote")
+	// ErrReadTimeout is a timeout on session.Recv
+	ErrReadTimeout = errors.New("read timeout")
+	// ErrDecryptingData is for when theres a nonce error
+	ErrDecryptingData = errors.New("error decrypting data")
 )
 
 // Mode of the session
@@ -36,26 +46,27 @@ type Mode uint8
 // and Micro-Tunnel-Session header. The tunnel id is a hash of
 // the address being requested.
 type Tunnel interface {
+	// Init initializes tunnel with options
 	Init(opts ...Option) error
-	// Address the tunnel is listening on
+	// Address returns the address the tunnel is listening on
 	Address() string
 	// Connect connects the tunnel
 	Connect() error
 	// Close closes the tunnel
 	Close() error
-	// All the links the tunnel is connected to
+	// Links returns all the links the tunnel is connected to
 	Links() []Link
-	// Connect to a channel
+	// Dial allows a client to connect to a channel
 	Dial(channel string, opts ...DialOption) (Session, error)
-	// Accept connections on a channel
+	// Listen allows to accept connections on a channel
 	Listen(channel string, opts ...ListenOption) (Listener, error)
-	// Name of the tunnel implementation
+	// String returns the name of the tunnel implementation
 	String() string
 }
 
 // Link represents internal links to the tunnel
 type Link interface {
-	// The id of the link
+	// Id returns the link unique Id
 	Id() string
 	// Delay is the current load on the link (lower is better)
 	Delay() int64
@@ -63,7 +74,9 @@ type Link interface {
 	Length() int64
 	// Current transfer rate as bits per second (lower is better)
 	Rate() float64
-	// State of the link e.g connected/closed
+	// Is this a loopback link
+	Loopback() bool
+	// State of the link: connected/closed/error
 	State() string
 	// honours transport socket
 	transport.Socket

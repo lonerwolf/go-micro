@@ -4,15 +4,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/micro/go-micro/transport"
-	"github.com/micro/go-micro/transport/quic"
+	"github.com/micro/go-micro/v2/logger"
+	"github.com/micro/go-micro/v2/transport"
+	"github.com/micro/go-micro/v2/transport/quic"
 )
 
 var (
 	// DefaultAddress is default tunnel bind address
 	DefaultAddress = ":0"
 	// The shared default token
-	DefaultToken = "micro"
+	DefaultToken = "go.micro.tunnel"
+	log          = logger.NewHelper(logger.DefaultLogger).WithFields(map[string]interface{}{"service": "tunnel"})
 )
 
 type Option func(*Options)
@@ -38,6 +40,8 @@ type DialOptions struct {
 	Link string
 	// specify mode of the session
 	Mode Mode
+	// Wait for connection to be accepted
+	Wait bool
 	// the dial timeout
 	Timeout time.Duration
 }
@@ -47,6 +51,8 @@ type ListenOption func(*ListenOptions)
 type ListenOptions struct {
 	// specify mode of the session
 	Mode Mode
+	// The read timeout
+	Timeout time.Duration
 }
 
 // The tunnel id
@@ -84,20 +90,17 @@ func Transport(t transport.Transport) Option {
 	}
 }
 
-// DefaultOptions returns router default options
-func DefaultOptions() Options {
-	return Options{
-		Id:        uuid.New().String(),
-		Address:   DefaultAddress,
-		Token:     DefaultToken,
-		Transport: quic.NewTransport(),
-	}
-}
-
 // Listen options
 func ListenMode(m Mode) ListenOption {
 	return func(o *ListenOptions) {
 		o.Mode = m
+	}
+}
+
+// Timeout for reads and writes on the listener session
+func ListenTimeout(t time.Duration) ListenOption {
+	return func(o *ListenOptions) {
+		o.Timeout = t
 	}
 }
 
@@ -122,5 +125,23 @@ func DialTimeout(t time.Duration) DialOption {
 func DialLink(id string) DialOption {
 	return func(o *DialOptions) {
 		o.Link = id
+	}
+}
+
+// DialWait specifies whether to wait for the connection
+// to be accepted before returning the session
+func DialWait(b bool) DialOption {
+	return func(o *DialOptions) {
+		o.Wait = b
+	}
+}
+
+// DefaultOptions returns router default options
+func DefaultOptions() Options {
+	return Options{
+		Id:        uuid.New().String(),
+		Address:   DefaultAddress,
+		Token:     DefaultToken,
+		Transport: quic.NewTransport(),
 	}
 }

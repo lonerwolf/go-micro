@@ -3,16 +3,16 @@ package memory
 import (
 	"time"
 
-	"github.com/micro/go-micro/registry"
+	"github.com/micro/go-micro/v2/registry"
 )
 
 func serviceToRecord(s *registry.Service, ttl time.Duration) *record {
-	metadata := make(map[string]string)
+	metadata := make(map[string]string, len(s.Metadata))
 	for k, v := range s.Metadata {
 		metadata[k] = v
 	}
 
-	nodes := make(map[string]*node)
+	nodes := make(map[string]*node, len(s.Nodes))
 	for _, n := range s.Nodes {
 		nodes[n.Id] = &node{
 			Node:     n,
@@ -36,7 +36,7 @@ func serviceToRecord(s *registry.Service, ttl time.Duration) *record {
 }
 
 func recordToService(r *record) *registry.Service {
-	metadata := make(map[string]string)
+	metadata := make(map[string]string, len(r.Metadata))
 	for k, v := range r.Metadata {
 		metadata[k] = v
 	}
@@ -44,11 +44,15 @@ func recordToService(r *record) *registry.Service {
 	endpoints := make([]*registry.Endpoint, len(r.Endpoints))
 	for i, e := range r.Endpoints {
 		request := new(registry.Value)
-		request = e.Request
+		if e.Request != nil {
+			*request = *e.Request
+		}
 		response := new(registry.Value)
-		response = e.Response
+		if e.Response != nil {
+			*response = *e.Response
+		}
 
-		metadata := make(map[string]string)
+		metadata := make(map[string]string, len(e.Metadata))
 		for k, v := range e.Metadata {
 			metadata[k] = v
 		}
@@ -64,7 +68,7 @@ func recordToService(r *record) *registry.Service {
 	nodes := make([]*registry.Node, len(r.Nodes))
 	i := 0
 	for _, n := range r.Nodes {
-		metadata := make(map[string]string)
+		metadata := make(map[string]string, len(n.Metadata))
 		for k, v := range n.Metadata {
 			metadata[k] = v
 		}

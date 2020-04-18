@@ -1,13 +1,18 @@
 // Package runtime is a service runtime manager
 package runtime
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 var (
 	// DefaultRuntime is default micro runtime
 	DefaultRuntime Runtime = NewRuntime()
 	// DefaultName is default runtime service name
 	DefaultName = "go.micro.runtime"
+
+	ErrAlreadyExists = errors.New("already exists")
 )
 
 // Runtime is a service runtime manager
@@ -16,29 +21,43 @@ type Runtime interface {
 	Init(...Option) error
 	// Create registers a service
 	Create(*Service, ...CreateOption) error
-	// Get returns service or fails with error
-	Get(string, ...GetOption) ([]*Service, error)
+	// Read returns the service
+	Read(...ReadOption) ([]*Service, error)
 	// Update the service in place
 	Update(*Service) error
 	// Remove a service
 	Delete(*Service) error
-	// List the managed services
-	List() ([]*Service, error)
+	// Logs returns the logs for a service
+	Logs(*Service, ...LogsOption) (LogStream, error)
 	// Start starts the runtime
 	Start() error
 	// Stop shuts down the runtime
 	Stop() error
+	// String describes runtime
+	String() string
 }
 
-// Notifier is an update notifier
-type Notifier interface {
-	// Notify publishes notification events
+// Stream returns a log stream
+type LogStream interface {
+	Error() error
+	Chan() chan LogRecord
+	Stop() error
+}
+
+type LogRecord struct {
+	Message  string
+	Metadata map[string]string
+}
+
+// Scheduler is a runtime service scheduler
+type Scheduler interface {
+	// Notify publishes schedule events
 	Notify() (<-chan Event, error)
-	// Close stops the notifier
+	// Close stops the scheduler
 	Close() error
 }
 
-// EventType defines notification event
+// EventType defines schedule event
 type EventType int
 
 const (
@@ -80,14 +99,10 @@ type Event struct {
 type Service struct {
 	// Name of the service
 	Name string
-	// url location of source
-	Source string
-	// Path to store source
-	Path string
-	// Exec command
-	Exec []string
 	// Version of the service
 	Version string
+	// url location of source
+	Source string
 	// Metadata stores metadata
 	Metadata map[string]string
 }

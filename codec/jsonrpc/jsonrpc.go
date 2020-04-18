@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/micro/go-micro/codec"
+	"github.com/micro/go-micro/v2/codec"
 )
 
 type jsonCodec struct {
@@ -60,7 +60,6 @@ func (j *jsonCodec) ReadHeader(m *codec.Message, mt codec.MessageType) error {
 	default:
 		return fmt.Errorf("Unrecognised message type: %v", mt)
 	}
-	return nil
 }
 
 func (j *jsonCodec) ReadBody(b interface{}) error {

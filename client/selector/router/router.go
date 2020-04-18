@@ -7,11 +7,11 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/micro/go-micro/client"
-	"github.com/micro/go-micro/client/selector"
-	"github.com/micro/go-micro/registry"
-	"github.com/micro/go-micro/router"
-	pb "github.com/micro/go-micro/router/proto"
+	"github.com/micro/go-micro/v2/client"
+	"github.com/micro/go-micro/v2/client/selector"
+	"github.com/micro/go-micro/v2/registry"
+	"github.com/micro/go-micro/v2/router"
+	pb "github.com/micro/go-micro/v2/router/service/proto"
 )
 
 type routerSelector struct {
@@ -176,12 +176,10 @@ func (r *routerSelector) Select(service string, opts ...selector.SelectOption) (
 
 func (r *routerSelector) Mark(service string, node *registry.Node, err error) {
 	// TODO: pass back metrics or information to the router
-	return
 }
 
 func (r *routerSelector) Reset(service string) {
 	// TODO: reset the metrics or information at the router
-	return
 }
 
 func (r *routerSelector) Close() error {

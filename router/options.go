@@ -2,8 +2,8 @@ package router
 
 import (
 	"github.com/google/uuid"
-	"github.com/micro/go-micro/client"
-	"github.com/micro/go-micro/registry"
+	"github.com/micro/go-micro/v2/client"
+	"github.com/micro/go-micro/v2/registry"
 )
 
 // Options are router options
@@ -80,6 +80,6 @@ func DefaultOptions() Options {
 		Address:   DefaultAddress,
 		Network:   DefaultNetwork,
 		Registry:  registry.DefaultRegistry,
-		Advertise: AdvertiseBest,
+		Advertise: AdvertiseLocal,
 	}
 }

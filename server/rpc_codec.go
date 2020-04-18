@@ -4,14 +4,14 @@ import (
 	"bytes"
 	"sync"
 
-	"github.com/micro/go-micro/codec"
-	raw "github.com/micro/go-micro/codec/bytes"
-	"github.com/micro/go-micro/codec/grpc"
-	"github.com/micro/go-micro/codec/json"
-	"github.com/micro/go-micro/codec/jsonrpc"
-	"github.com/micro/go-micro/codec/proto"
-	"github.com/micro/go-micro/codec/protorpc"
-	"github.com/micro/go-micro/transport"
+	"github.com/micro/go-micro/v2/codec"
+	raw "github.com/micro/go-micro/v2/codec/bytes"
+	"github.com/micro/go-micro/v2/codec/grpc"
+	"github.com/micro/go-micro/v2/codec/json"
+	"github.com/micro/go-micro/v2/codec/jsonrpc"
+	"github.com/micro/go-micro/v2/codec/proto"
+	"github.com/micro/go-micro/v2/codec/protorpc"
+	"github.com/micro/go-micro/v2/transport"
 	"github.com/oxtoacart/bpool"
 	"github.com/pkg/errors"
 )
@@ -86,24 +86,18 @@ func getHeader(hdr string, md map[string]string) string {
 }
 
 func getHeaders(m *codec.Message) {
-	get := func(hdr, v string) string {
+	set := func(v, hdr string) string {
 		if len(v) > 0 {
 			return v
 		}
-
-		if hd := m.Header[hdr]; len(hd) > 0 {
-			return hd
-		}
-
-		// old
-		return m.Header["X-"+hdr]
+		return m.Header[hdr]
 	}
 
-	m.Id = get("Micro-Id", m.Id)
-	m.Error = get("Micro-Error", m.Error)
-	m.Endpoint = get("Micro-Endpoint", m.Endpoint)
-	m.Method = get("Micro-Method", m.Method)
-	m.Target = get("Micro-Service", m.Target)
+	m.Id = set(m.Id, "Micro-Id")
+	m.Error = set(m.Error, "Micro-Error")
+	m.Endpoint = set(m.Endpoint, "Micro-Endpoint")
+	m.Method = set(m.Method, "Micro-Method")
+	m.Target = set(m.Target, "Micro-Service")
 
 	// TODO: remove this cruft
 	if len(m.Endpoint) == 0 {
@@ -135,9 +129,15 @@ func setupProtocol(msg *transport.Message) codec.NewCodec {
 	endpoint := getHeader("Micro-Endpoint", msg.Header)
 	protocol := getHeader("Micro-Protocol", msg.Header)
 	target := getHeader("Micro-Target", msg.Header)
+	topic := getHeader("Micro-Topic", msg.Header)
 
 	// if the protocol exists (mucp) do nothing
 	if len(protocol) > 0 {
+		return nil
+	}
+
+	// newer method of processing messages over transport
+	if len(topic) > 0 {
 		return nil
 	}
 
@@ -315,7 +315,6 @@ func (c *rpcCodec) Write(r *codec.Message, b interface{}) error {
 
 		// write an error if it failed
 		m.Error = errors.Wrapf(err, "Unable to encode body").Error()
-		m.Header["X-Micro-Error"] = m.Error
 		m.Header["Micro-Error"] = m.Error
 		// no body to write
 		if err := c.codec.Write(m, nil); err != nil {

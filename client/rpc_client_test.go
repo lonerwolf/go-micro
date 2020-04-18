@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/micro/go-micro/client/selector"
-	"github.com/micro/go-micro/errors"
-	"github.com/micro/go-micro/registry"
-	"github.com/micro/go-micro/registry/memory"
+	"github.com/micro/go-micro/v2/client/selector"
+	"github.com/micro/go-micro/v2/errors"
+	"github.com/micro/go-micro/v2/registry"
+	"github.com/micro/go-micro/v2/registry/memory"
 )
 
 func newTestRegistry() registry.Registry {
@@ -143,6 +143,9 @@ func TestCallWrapper(t *testing.T) {
 			{
 				Id:      id,
 				Address: address,
+				Metadata: map[string]string{
+					"protocol": "mucp",
+				},
 			},
 		},
 	})

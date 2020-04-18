@@ -4,31 +4,31 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/micro/go-micro/broker"
-	"github.com/micro/go-micro/client/pool"
-	"github.com/micro/go-micro/client/selector"
-	"github.com/micro/go-micro/codec"
-	"github.com/micro/go-micro/errors"
-	"github.com/micro/go-micro/metadata"
-	"github.com/micro/go-micro/registry"
-	"github.com/micro/go-micro/transport"
-	"github.com/micro/go-micro/util/buf"
+	"github.com/micro/go-micro/v2/broker"
+	"github.com/micro/go-micro/v2/client/selector"
+	"github.com/micro/go-micro/v2/codec"
+	raw "github.com/micro/go-micro/v2/codec/bytes"
+	"github.com/micro/go-micro/v2/errors"
+	"github.com/micro/go-micro/v2/metadata"
+	"github.com/micro/go-micro/v2/registry"
+	"github.com/micro/go-micro/v2/transport"
+	"github.com/micro/go-micro/v2/util/buf"
+	"github.com/micro/go-micro/v2/util/pool"
 )
 
 type rpcClient struct {
-	once sync.Once
+	once atomic.Value
 	opts Options
 	pool pool.Pool
 	seq  uint64
 }
 
 func newRpcClient(opt ...Option) Client {
-	opts := newOptions(opt...)
+	opts := NewOptions(opt...)
 
 	p := pool.NewPool(
 		pool.Size(opts.PoolSize),
@@ -37,11 +37,11 @@ func newRpcClient(opt ...Option) Client {
 	)
 
 	rc := &rpcClient{
-		once: sync.Once{},
 		opts: opts,
 		pool: p,
 		seq:  0,
 	}
+	rc.once.Store(false)
 
 	c := Client(rc)
 
@@ -73,6 +73,11 @@ func (r *rpcClient) call(ctx context.Context, node *registry.Node, req Request, 
 	md, ok := metadata.FromContext(ctx)
 	if ok {
 		for k, v := range md {
+			// don't copy Micro-Topic header, that used for pub/sub
+			// this fix case then client uses the same context that received in subscriber
+			if k == "Micro-Topic" {
+				continue
+			}
 			msg.Header[k] = v
 		}
 	}
@@ -161,7 +166,6 @@ func (r *rpcClient) call(ctx context.Context, node *registry.Node, req Request, 
 
 	select {
 	case err := <-ch:
-		grr = err
 		return err
 	case <-ctx.Done():
 		grr = errors.Timeout("go.micro.client", fmt.Sprintf("%v", ctx.Err()))
@@ -194,7 +198,9 @@ func (r *rpcClient) stream(ctx context.Context, node *registry.Node, req Request
 	}
 
 	// set timeout in nanoseconds
-	msg.Header["Timeout"] = fmt.Sprintf("%d", opts.RequestTimeout)
+	if opts.StreamTimeout > time.Duration(0) {
+		msg.Header["Timeout"] = fmt.Sprintf("%d", opts.StreamTimeout)
+	}
 	// set the content type for the request
 	msg.Header["Content-Type"] = req.ContentType()
 	// set the accept header
@@ -316,11 +322,31 @@ func (r *rpcClient) Options() Options {
 	return r.opts
 }
 
+// hasProxy checks if we have proxy set in the environment
+func (r *rpcClient) hasProxy() bool {
+	// get proxy
+	if prx := os.Getenv("MICRO_PROXY"); len(prx) > 0 {
+		return true
+	}
+
+	// get proxy address
+	if prx := os.Getenv("MICRO_PROXY_ADDRESS"); len(prx) > 0 {
+		return true
+	}
+
+	return false
+}
+
+// next returns an iterator for the next nodes to call
 func (r *rpcClient) next(request Request, opts CallOptions) (selector.Next, error) {
 	service := request.Service()
 
 	// get proxy
 	if prx := os.Getenv("MICRO_PROXY"); len(prx) > 0 {
+		// default name
+		if prx == "service" {
+			prx = "go.micro.proxy"
+		}
 		service = prx
 	}
 
@@ -377,7 +403,9 @@ func (r *rpcClient) Call(ctx context.Context, request Request, response interfac
 	d, ok := ctx.Deadline()
 	if !ok {
 		// no deadline so we create a new one
-		ctx, _ = context.WithTimeout(ctx, callOpts.RequestTimeout)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, callOpts.RequestTimeout)
+		defer cancel()
 	} else {
 		// got a deadline so no need to setup context
 		// but we need to set the timeout we pass along
@@ -429,10 +457,18 @@ func (r *rpcClient) Call(ctx context.Context, request Request, response interfac
 		return err
 	}
 
-	ch := make(chan error, callOpts.Retries+1)
+	// get the retries
+	retries := callOpts.Retries
+
+	// disable retries when using a proxy
+	if r.hasProxy() {
+		retries = 0
+	}
+
+	ch := make(chan error, retries+1)
 	var gerr error
 
-	for i := 0; i <= callOpts.Retries; i++ {
+	for i := 0; i <= retries; i++ {
 		go func(i int) {
 			ch <- call(i)
 		}(i)
@@ -512,10 +548,18 @@ func (r *rpcClient) Stream(ctx context.Context, request Request, opts ...CallOpt
 		err    error
 	}
 
-	ch := make(chan response, callOpts.Retries+1)
+	// get the retries
+	retries := callOpts.Retries
+
+	// disable retries when using a proxy
+	if r.hasProxy() {
+		retries = 0
+	}
+
+	ch := make(chan response, retries+1)
 	var grr error
 
-	for i := 0; i <= callOpts.Retries; i++ {
+	for i := 0; i <= retries; i++ {
 		go func(i int) {
 			s, err := call(i)
 			ch <- response{s, err}
@@ -567,11 +611,6 @@ func (r *rpcClient) Publish(ctx context.Context, msg Message, opts ...PublishOpt
 	// set the topic
 	topic := msg.Topic()
 
-	// get proxy
-	if prx := os.Getenv("MICRO_PROXY"); len(prx) > 0 {
-		options.Exchange = prx
-	}
-
 	// get the exchange
 	if len(options.Exchange) > 0 {
 		topic = options.Exchange
@@ -583,26 +622,40 @@ func (r *rpcClient) Publish(ctx context.Context, msg Message, opts ...PublishOpt
 		return errors.InternalServerError("go.micro.client", err.Error())
 	}
 
-	// new buffer
-	b := buf.New(nil)
+	var body []byte
 
-	if err := cf(b).Write(&codec.Message{
-		Target: topic,
-		Type:   codec.Event,
-		Header: map[string]string{
-			"Micro-Id":    id,
-			"Micro-Topic": msg.Topic(),
-		},
-	}, msg.Payload()); err != nil {
-		return errors.InternalServerError("go.micro.client", err.Error())
+	// passed in raw data
+	if d, ok := msg.Payload().(*raw.Frame); ok {
+		body = d.Data
+	} else {
+		// new buffer
+		b := buf.New(nil)
+
+		if err := cf(b).Write(&codec.Message{
+			Target: topic,
+			Type:   codec.Event,
+			Header: map[string]string{
+				"Micro-Id":    id,
+				"Micro-Topic": msg.Topic(),
+			},
+		}, msg.Payload()); err != nil {
+			return errors.InternalServerError("go.micro.client", err.Error())
+		}
+
+		// set the body
+		body = b.Bytes()
 	}
-	r.once.Do(func() {
-		r.opts.Broker.Connect()
-	})
+
+	if !r.once.Load().(bool) {
+		if err = r.opts.Broker.Connect(); err != nil {
+			return errors.InternalServerError("go.micro.client", err.Error())
+		}
+		r.once.Store(true)
+	}
 
 	return r.opts.Broker.Publish(topic, &broker.Message{
 		Header: md,
-		Body:   b.Bytes(),
+		Body:   body,
 	})
 }
 

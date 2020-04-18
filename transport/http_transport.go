@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	maddr "github.com/micro/go-micro/util/addr"
-	"github.com/micro/go-micro/util/buf"
-	mnet "github.com/micro/go-micro/util/net"
-	mls "github.com/micro/go-micro/util/tls"
+	maddr "github.com/micro/go-micro/v2/util/addr"
+	"github.com/micro/go-micro/v2/util/buf"
+	mnet "github.com/micro/go-micro/v2/util/net"
+	mls "github.com/micro/go-micro/v2/util/tls"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
@@ -156,7 +156,7 @@ func (h *httpTransportClient) Recv(m *Message) error {
 	m.Body = b
 
 	if m.Header == nil {
-		m.Header = make(map[string]string)
+		m.Header = make(map[string]string, len(rsp.Header))
 	}
 
 	for k, v := range rsp.Header {
@@ -192,9 +192,8 @@ func (h *httpTransportSocket) Recv(m *Message) error {
 	if m == nil {
 		return errors.New("message passed in is nil")
 	}
-
 	if m.Header == nil {
-		m.Header = make(map[string]string)
+		m.Header = make(map[string]string, len(h.r.Header))
 	}
 
 	// process http 1
@@ -285,8 +284,14 @@ func (h *httpTransportSocket) Recv(m *Message) error {
 
 func (h *httpTransportSocket) Send(m *Message) error {
 	if h.r.ProtoMajor == 1 {
+		// make copy of header
+		hdr := make(http.Header)
+		for k, v := range h.r.Header {
+			hdr[k] = v
+		}
+
 		rsp := &http.Response{
-			Header:        h.r.Header,
+			Header:        hdr,
 			Body:          ioutil.NopCloser(bytes.NewReader(m.Body)),
 			Status:        "200 OK",
 			StatusCode:    200,

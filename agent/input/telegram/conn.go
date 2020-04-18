@@ -6,9 +6,9 @@ import (
 	"sync"
 
 	"github.com/forestgiant/sliceutil"
-	"github.com/micro/go-micro/agent/input"
-	"github.com/micro/go-micro/util/log"
-	"gopkg.in/telegram-bot-api.v4"
+	"github.com/micro/go-micro/v2/agent/input"
+	"github.com/micro/go-micro/v2/logger"
+	tgbotapi "gopkg.in/telegram-bot-api.v4"
 )
 
 type telegramConn struct {
@@ -44,11 +44,9 @@ func (tc *telegramConn) run() {
 	tc.recv = updates
 	tc.syncCond.Signal()
 
-	for {
-		select {
-		case <-tc.exit:
-			return
-		}
+	select {
+	case <-tc.exit:
+		return
 	}
 }
 
@@ -106,7 +104,9 @@ func (tc *telegramConn) Send(event *input.Event) error {
 
 	if err != nil {
 		// probably it could be because of nested HTML tags -- telegram doesn't allow nested tags
-		log.Log("[telegram][Send] error:", err)
+		if logger.V(logger.ErrorLevel, logger.DefaultLogger) {
+			logger.Error("[telegram][Send] error:", err)
+		}
 		msgConfig.Text = "This bot couldn't send the response (Internal error)"
 		tc.input.api.Send(msgConfig)
 	}

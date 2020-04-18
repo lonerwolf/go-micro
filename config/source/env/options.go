@@ -5,7 +5,7 @@ import (
 
 	"strings"
 
-	"github.com/micro/go-micro/config/source"
+	"github.com/micro/go-micro/v2/config/source"
 )
 
 type strippedPrefixKey struct{}
@@ -35,6 +35,7 @@ func WithPrefix(p ...string) source.Option {
 }
 
 func appendUnderscore(prefixes []string) []string {
+	//nolint:prealloc
 	var result []string
 	for _, p := range prefixes {
 		if !strings.HasSuffix(p, "_") {

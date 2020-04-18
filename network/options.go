@@ -2,12 +2,12 @@ package network
 
 import (
 	"github.com/google/uuid"
-	"github.com/micro/go-micro/network/resolver"
-	"github.com/micro/go-micro/network/resolver/registry"
-	"github.com/micro/go-micro/proxy"
-	"github.com/micro/go-micro/proxy/mucp"
-	"github.com/micro/go-micro/router"
-	"github.com/micro/go-micro/tunnel"
+	"github.com/micro/go-micro/v2/network/resolver"
+	"github.com/micro/go-micro/v2/network/resolver/registry"
+	"github.com/micro/go-micro/v2/proxy"
+	"github.com/micro/go-micro/v2/proxy/mucp"
+	"github.com/micro/go-micro/v2/router"
+	"github.com/micro/go-micro/v2/tunnel"
 )
 
 type Option func(*Options)
@@ -22,8 +22,8 @@ type Options struct {
 	Address string
 	// Advertise sets the address to advertise
 	Advertise string
-	// Peers is a list of peers to connect to
-	Peers []string
+	// Nodes is a list of nodes to connect to
+	Nodes []string
 	// Tunnel is network tunnel
 	Tunnel tunnel.Tunnel
 	// Router is network router
@@ -62,10 +62,10 @@ func Advertise(a string) Option {
 	}
 }
 
-// Peers is a list of peers to connect to
-func Peers(n ...string) Option {
+// Nodes is a list of nodes to connect to
+func Nodes(n ...string) Option {
 	return func(o *Options) {
-		o.Peers = n
+		o.Nodes = n
 	}
 }
 

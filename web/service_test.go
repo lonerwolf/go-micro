@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/micro/go-micro/registry"
-	"github.com/micro/go-micro/registry/memory"
+	"github.com/micro/go-micro/v2/registry"
+	"github.com/micro/go-micro/v2/registry/memory"
 )
 
 func TestService(t *testing.T) {
@@ -57,10 +57,10 @@ func TestService(t *testing.T) {
 
 	service.HandleFunc("/", fn)
 
+	errCh := make(chan error, 1)
 	go func() {
-		if err := service.Run(); err != nil {
-			t.Fatal(err)
-		}
+		errCh <- service.Run()
+		close(errCh)
 	}()
 
 	var s []*registry.Service
@@ -104,11 +104,38 @@ func TestService(t *testing.T) {
 		}
 	}
 
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("service.Run():%v", err)
+		}
+	case <-time.After(time.Duration(time.Second)):
+		if len(os.Getenv("IN_TRAVIS_CI")) == 0 {
+			t.Logf("service.Run() survived a client request without an error")
+		}
+	}
+
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGTERM)
+	p, _ := os.FindProcess(os.Getpid())
+	p.Signal(syscall.SIGTERM)
 
-	syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
 	<-ch
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("service.Run():%v", err)
+		} else {
+			if len(os.Getenv("IN_TRAVIS_CI")) == 0 {
+				t.Log("service.Run() nil return on syscall.SIGTERM")
+			}
+		}
+	case <-time.After(time.Duration(time.Second)):
+		if len(os.Getenv("IN_TRAVIS_CI")) == 0 {
+			t.Logf("service.Run() survived a client request without an error")
+		}
+	}
 
 	eventually(func() bool {
 		_, err := reg.GetService("go.micro.web.test")
@@ -128,6 +155,7 @@ func TestService(t *testing.T) {
 			t.Errorf("unexpected %s: want true, have false", tt.subject)
 		}
 	}
+
 }
 
 func TestOptions(t *testing.T) {
@@ -135,7 +163,7 @@ func TestOptions(t *testing.T) {
 		name             = "service-name"
 		id               = "service-id"
 		version          = "service-version"
-		address          = "service-addr"
+		address          = "service-addr:8080"
 		advertise        = "service-adv"
 		reg              = memory.NewRegistry()
 		registerTTL      = 123 * time.Second
@@ -221,10 +249,10 @@ func TestTLS(t *testing.T) {
 
 	service.HandleFunc("/", fn)
 
+	errCh := make(chan error, 1)
 	go func() {
-		if err := service.Run(); err != nil {
-			t.Fatal(err)
-		}
+		errCh <- service.Run()
+		close(errCh)
 	}()
 
 	var s []*registry.Service
@@ -257,4 +285,16 @@ func TestTLS(t *testing.T) {
 	if string(b) != str {
 		t.Errorf("Expected %s got %s", str, string(b))
 	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("service.Run():%v", err)
+		}
+	case <-time.After(time.Duration(time.Second)):
+		if len(os.Getenv("IN_TRAVIS_CI")) == 0 {
+			t.Logf("service.Run() survived a client request without an error")
+		}
+	}
+
 }

@@ -1,8 +1,8 @@
 package grpc
 
 import (
-	"github.com/micro/go-micro/codec"
-	"github.com/micro/go-micro/codec/bytes"
+	"github.com/micro/go-micro/v2/codec"
+	"github.com/micro/go-micro/v2/codec/bytes"
 )
 
 type rpcRequest struct {
@@ -20,6 +20,9 @@ type rpcMessage struct {
 	topic       string
 	contentType string
 	payload     interface{}
+	header      map[string]string
+	body        []byte
+	codec       codec.Codec
 }
 
 func (r *rpcRequest) ContentType() string {
@@ -72,4 +75,16 @@ func (r *rpcMessage) Topic() string {
 
 func (r *rpcMessage) Payload() interface{} {
 	return r.payload
+}
+
+func (r *rpcMessage) Header() map[string]string {
+	return r.header
+}
+
+func (r *rpcMessage) Body() []byte {
+	return r.body
+}
+
+func (r *rpcMessage) Codec() codec.Reader {
+	return r.codec
 }

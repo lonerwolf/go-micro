@@ -8,36 +8,110 @@ type Option func(o *Options)
 
 // Options configure runtime
 type Options struct {
-	// Notifier for updates
-	Notifier Notifier
+	// Scheduler for updates
+	Scheduler Scheduler
+	// Service type to manage
+	Type string
+	// Source of the services repository
+	Source string
+	// Base image to use
+	Image string
 }
 
-// AutoUpdate enables micro auto-updates
-func WithNotifier(n Notifier) Option {
+// WithSource sets the base image / repository
+func WithSource(src string) Option {
 	return func(o *Options) {
-		o.Notifier = n
+		o.Source = src
+	}
+}
+
+// WithScheduler specifies a scheduler for updates
+func WithScheduler(n Scheduler) Option {
+	return func(o *Options) {
+		o.Scheduler = n
+	}
+}
+
+// WithType sets the service type to manage
+func WithType(t string) Option {
+	return func(o *Options) {
+		o.Type = t
+	}
+}
+
+// WithImage sets the image to use
+func WithImage(t string) Option {
+	return func(o *Options) {
+		o.Image = t
 	}
 }
 
 type CreateOption func(o *CreateOptions)
 
+type ReadOption func(o *ReadOptions)
+
 // CreateOptions configure runtime services
 type CreateOptions struct {
-	// command to execute including args
+	// Command to execut
 	Command []string
+	// Args to pass into command
+	Args []string
 	// Environment to configure
 	Env []string
 	// Log output
 	Output io.Writer
+	// Type of service to create
+	Type string
+	// Retries before failing deploy
+	Retries int
+	// Specify the image to use
+	Image string
+}
+
+// ReadOptions queries runtime services
+type ReadOptions struct {
+	// Service name
+	Service string
+	// Version queries services with given version
+	Version string
+	// Type of service
+	Type string
+}
+
+// CreateType sets the type of service to create
+func CreateType(t string) CreateOption {
+	return func(o *CreateOptions) {
+		o.Type = t
+	}
+}
+
+// CreateImage sets the image to use
+func CreateImage(img string) CreateOption {
+	return func(o *CreateOptions) {
+		o.Image = img
+	}
 }
 
 // WithCommand specifies the command to execute
-func WithCommand(c string, args ...string) CreateOption {
+func WithCommand(cmd ...string) CreateOption {
 	return func(o *CreateOptions) {
 		// set command
-		o.Command = []string{c}
-		// set args
-		o.Command = append(o.Command, args...)
+		o.Command = cmd
+	}
+}
+
+// WithArgs specifies the command to execute
+func WithArgs(args ...string) CreateOption {
+	return func(o *CreateOptions) {
+		// set command
+		o.Args = args
+	}
+}
+
+// WithRetries sets the max retries attemps
+func WithRetries(retries int) CreateOption {
+	return func(o *CreateOptions) {
+		o.Retries = retries
 	}
 }
 
@@ -55,17 +129,48 @@ func WithOutput(out io.Writer) CreateOption {
 	}
 }
 
-type GetOption func(o *GetOptions)
-
-// GetOptions queries runtime services
-type GetOptions struct {
-	// Version queries services with given version
-	Version string
+// ReadService returns services with the given name
+func ReadService(service string) ReadOption {
+	return func(o *ReadOptions) {
+		o.Service = service
+	}
 }
 
-// WithVersion confifgures service version
-func WithVersion(version string) GetOption {
-	return func(o *GetOptions) {
+// ReadVersion confifgures service version
+func ReadVersion(version string) ReadOption {
+	return func(o *ReadOptions) {
 		o.Version = version
+	}
+}
+
+// ReadType returns services of the given type
+func ReadType(t string) ReadOption {
+	return func(o *ReadOptions) {
+		o.Type = t
+	}
+}
+
+// LogsOption configures runtime logging
+type LogsOption func(o *LogsOptions)
+
+// LogsOptions configure runtime logging
+type LogsOptions struct {
+	// How many existing lines to show
+	Count int64
+	// Stream new lines?
+	Stream bool
+}
+
+// LogsExistingCount confiures how many existing lines to show
+func LogsCount(count int64) LogsOption {
+	return func(l *LogsOptions) {
+		l.Count = count
+	}
+}
+
+// LogsStream configures whether to stream new lines
+func LogsStream(stream bool) LogsOption {
+	return func(l *LogsOptions) {
+		l.Stream = stream
 	}
 }

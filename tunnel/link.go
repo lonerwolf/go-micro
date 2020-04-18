@@ -2,21 +2,28 @@ package tunnel
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/micro/go-micro/transport"
-	"github.com/micro/go-micro/util/log"
+	"github.com/micro/go-micro/v2/logger"
+	"github.com/micro/go-micro/v2/transport"
 )
 
 type link struct {
 	transport.Socket
 
+	// transport to use for connections
+	transport transport.Transport
+
 	sync.RWMutex
+
 	// stops the link
 	closed chan bool
+	// metric used to track metrics
+	metric chan *metric
 	// link state channel for testing link
 	state chan *packet
 	// send queue for sending packets
@@ -60,11 +67,23 @@ type packet struct {
 	err error
 }
 
+// metric is used to record link rate
+type metric struct {
+	// amount of data sent
+	data int
+	// time taken to send
+	duration time.Duration
+	// if an error occurred
+	status error
+}
+
 var (
 	// the 4 byte 0 packet sent to determine the link state
 	linkRequest = []byte{0, 0, 0, 0}
 	// the 4 byte 1 filled packet sent to determine link state
 	linkResponse = []byte{1, 1, 1, 1}
+
+	ErrLinkConnectTimeout = errors.New("link connect timeout")
 )
 
 func newLink(s transport.Socket) *link {
@@ -72,11 +91,12 @@ func newLink(s transport.Socket) *link {
 		Socket:        s,
 		id:            uuid.New().String(),
 		lastKeepAlive: time.Now(),
-		channels:      make(map[string]time.Time),
 		closed:        make(chan bool),
+		channels:      make(map[string]time.Time),
 		state:         make(chan *packet, 64),
 		sendQueue:     make(chan *packet, 128),
 		recvQueue:     make(chan *packet, 128),
+		metric:        make(chan *metric, 128),
 	}
 
 	// process inbound/outbound packets
@@ -105,10 +125,10 @@ func (l *link) setRate(bits int64, delta time.Duration) {
 // setRTT sets a nanosecond based moving average roundtrip time for the link
 func (l *link) setRTT(d time.Duration) {
 	l.Lock()
-	defer l.Unlock()
 
 	if l.length <= 0 {
 		l.length = d.Nanoseconds()
+		l.Unlock()
 		return
 	}
 
@@ -116,6 +136,8 @@ func (l *link) setRTT(d time.Duration) {
 	length := 0.8*float64(l.length) + 0.2*float64(d.Nanoseconds())
 	// set new length
 	l.length = int64(length)
+
+	l.Unlock()
 }
 
 func (l *link) delChannel(ch string) {
@@ -126,8 +148,9 @@ func (l *link) delChannel(ch string) {
 
 func (l *link) getChannel(ch string) time.Time {
 	l.RLock()
-	defer l.RUnlock()
-	return l.channels[ch]
+	t := l.channels[ch]
+	l.RUnlock()
+	return t
 }
 
 func (l *link) setChannel(channels ...string) {
@@ -153,9 +176,11 @@ func (l *link) process() {
 			m := new(transport.Message)
 			err := l.recv(m)
 			if err != nil {
-				l.Lock()
-				l.errCount++
-				l.Unlock()
+				// record the metric
+				select {
+				case l.metric <- &metric{status: err}:
+				default:
+				}
 			}
 
 			// process new received message
@@ -167,6 +192,8 @@ func (l *link) process() {
 				// process link state message
 				select {
 				case l.state <- pk:
+				case <-l.closed:
+					return
 				default:
 				}
 				continue
@@ -188,7 +215,11 @@ func (l *link) process() {
 		select {
 		case pk := <-l.sendQueue:
 			// send the message
-			pk.status <- l.send(pk.message)
+			select {
+			case pk.status <- l.send(pk.message):
+			case <-l.closed:
+				return
+			}
 		case <-l.closed:
 			return
 		}
@@ -198,14 +229,22 @@ func (l *link) process() {
 // manage manages the link state including rtt packets and channel mapping expiry
 func (l *link) manage() {
 	// tick over every minute to expire and fire rtt packets
-	t := time.NewTicker(time.Minute)
-	defer t.Stop()
+	t1 := time.NewTicker(time.Minute)
+	defer t1.Stop()
+
+	// used to batch update link metrics
+	t2 := time.NewTicker(time.Second * 5)
+	defer t2.Stop()
+
+	// get link id
+	linkId := l.Id()
 
 	// used to send link state packets
 	send := func(b []byte) error {
 		return l.Send(&transport.Message{
 			Header: map[string]string{
-				"Micro-Method": "link",
+				"Micro-Method":  "link",
+				"Micro-Link-Id": linkId,
 			}, Body: b,
 		})
 	}
@@ -228,21 +267,26 @@ func (l *link) manage() {
 			}
 			// check the type of message
 			switch {
-			case bytes.Compare(p.message.Body, linkRequest) == 0:
-				log.Tracef("Link %s received link request %v", l.id, p.message.Body)
+			case bytes.Equal(p.message.Body, linkRequest):
+				if logger.V(logger.TraceLevel, log) {
+					log.Tracef("Link %s received link request", linkId)
+				}
 				// send response
 				if err := send(linkResponse); err != nil {
 					l.Lock()
 					l.errCount++
 					l.Unlock()
 				}
-			case bytes.Compare(p.message.Body, linkResponse) == 0:
+			case bytes.Equal(p.message.Body, linkResponse):
 				// set round trip time
 				d := time.Since(now)
-				log.Tracef("Link %s received link response in %v", p.message.Body, d)
+				if logger.V(logger.TraceLevel, log) {
+					log.Tracef("Link %s received link response in %v", linkId, d)
+				}
+				// set the RTT
 				l.setRTT(d)
 			}
-		case <-t.C:
+		case <-t1.C:
 			// drop any channel mappings older than 2 minutes
 			var kill []string
 			killTime := time.Minute * 2
@@ -270,7 +314,57 @@ func (l *link) manage() {
 			// fire off a link state rtt packet
 			now = time.Now()
 			send(linkRequest)
+		case <-t2.C:
+			// get a batch of metrics
+			batch := l.batch()
+
+			// skip if there's no metrics
+			if len(batch) == 0 {
+				continue
+			}
+
+			// lock once to record a batch
+			l.Lock()
+			for _, metric := range batch {
+				l.record(metric)
+			}
+			l.Unlock()
 		}
+	}
+}
+
+func (l *link) batch() []*metric {
+	var metrics []*metric
+
+	// pull all the metrics
+	for {
+		select {
+		case m := <-l.metric:
+			metrics = append(metrics, m)
+		// non blocking return
+		default:
+			return metrics
+		}
+	}
+}
+
+func (l *link) record(m *metric) {
+	// there's an error increment the counter and bail
+	if m.status != nil {
+		l.errCount++
+		return
+	}
+
+	// reset the counter
+	l.errCount = 0
+
+	// calculate based on data
+	if m.data > 0 {
+		// bit sent
+		bits := m.data * 1024
+
+		// set the rate
+		l.setRate(int64(bits), m.duration)
 	}
 }
 
@@ -299,23 +393,32 @@ func (l *link) Delay() int64 {
 // Current transfer rate as bits per second (lower is better)
 func (l *link) Rate() float64 {
 	l.RLock()
-	defer l.RUnlock()
-	return l.rate
+	r := l.rate
+	l.RUnlock()
+	return r
+}
+
+func (l *link) Loopback() bool {
+	l.RLock()
+	lo := l.loopback
+	l.RUnlock()
+	return lo
 }
 
 // Length returns the roundtrip time as nanoseconds (lower is better).
 // Returns 0 where no measurement has been taken.
 func (l *link) Length() int64 {
 	l.RLock()
-	defer l.RUnlock()
-	return l.length
+	length := l.length
+	l.RUnlock()
+	return length
 }
 
 func (l *link) Id() string {
 	l.RLock()
-	defer l.RUnlock()
-
-	return l.id
+	id := l.id
+	l.RUnlock()
+	return id
 }
 
 func (l *link) Close() error {
@@ -341,15 +444,16 @@ func (l *link) Send(m *transport.Message) error {
 		status:  make(chan error, 1),
 	}
 
+	// calculate the data sent
+	dataSent := len(m.Body)
+
+	// set header length
+	for k, v := range m.Header {
+		dataSent += (len(k) + len(v))
+	}
+
 	// get time now
 	now := time.Now()
-
-	// check if its closed first
-	select {
-	case <-l.closed:
-		return io.EOF
-	default:
-	}
 
 	// queue the message
 	select {
@@ -369,33 +473,19 @@ func (l *link) Send(m *transport.Message) error {
 	case err = <-p.status:
 	}
 
-	l.Lock()
-	defer l.Unlock()
-
-	// there's an error increment the counter and bail
-	if err != nil {
-		l.errCount++
-		return err
+	// create a metric with
+	// time taken, size of package, error status
+	mt := &metric{
+		data:     dataSent,
+		duration: time.Since(now),
+		status:   err,
 	}
 
-	// reset the counter
-	l.errCount = 0
-
-	// calculate the data sent
-	dataSent := len(m.Body)
-
-	// set header length
-	for k, v := range m.Header {
-		dataSent += (len(k) + len(v))
-	}
-
-	// calculate based on data
-	if dataSent > 0 {
-		// bit sent
-		bits := dataSent * 1024
-
-		// set the rate
-		l.setRate(int64(bits), time.Since(now))
+	// pass back a metric
+	// do not block
+	select {
+	case l.metric <- mt:
+	default:
 	}
 
 	return nil
@@ -433,10 +523,13 @@ func (l *link) State() string {
 		return "closed"
 	default:
 		l.RLock()
-		defer l.RUnlock()
-		if l.errCount > 3 {
+		errCount := l.errCount
+		l.RUnlock()
+
+		if errCount > 3 {
 			return "error"
 		}
+
 		return "connected"
 	}
 }
